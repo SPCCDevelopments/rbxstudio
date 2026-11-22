@@ -29,7 +29,7 @@ struct ContentView: View {
                             })
                         Section(header: Text("Dev Only")){
                             NavigationLink(
-                                destination: EditingView(file: "", fileName: "")
+                                destination: EditingView(tree: [], fileName: "")
                                     .navigationBarHidden(true),
                                 label: {
                                     Text("Dev")
@@ -59,7 +59,7 @@ struct ContentView: View {
                             })
                         Section(header: Text("Dev Only")){
                             NavigationLink(
-                                destination: EditingView(file: "", fileName: "")
+                                destination: EditingView(tree: [], fileName: "")
                                     .navigationBarHidden(true),
                                 label: {
                                     Text("Dev")
@@ -104,7 +104,7 @@ struct ExploreView: View{
 
 struct FileView: View{
     @State var isImporting = false
-    @State var file = ""
+    @State var tree: [RbxNode] = []
     @State var fileName = ""
     @State var editorShown = false
     @State var alertShown = false
@@ -134,33 +134,31 @@ struct FileView: View{
                 }
             }
             .environmentObject(self.loading)
-            .fullScreenCover(isPresented: $editorShown, content: {EditingView(file: file, fileName: fileName)})
+            .fullScreenCover(isPresented: $editorShown, content: {EditingView(tree: tree, fileName: fileName)})
+            .alert(isPresented: $alertShown){
+                Alert(title: Text("Couldn't read that file"), message: Text("Make sure it is an .rbxlx (XML) place file."))
+            }
             .fileImporter(
                 isPresented: $isImporting,
                 allowedContentTypes: [.rbxlx],
                 allowsMultipleSelection: false
             ) { result in
-                do {
-                    loading.loading = true
-                    guard let selectedFile: URL = try result.get().first else {
-                        loading.loading = false
-                        return }
-                    if selectedFile.startAccessingSecurityScopedResource() {
-                        guard let input = String(data: try Data(contentsOf: selectedFile), encoding: .utf8) else { return }
-                        defer { selectedFile.stopAccessingSecurityScopedResource() }
-                        file = input
-                        fileName = (selectedFile.description as NSString).lastPathComponent.removingPercentEncoding!
-                        print("now loading")
-                        editorShown.toggle()
-                    } else {
-                        // Handle denied access
-                        loading.loading = false
+                guard let url = try? result.get().first else { return }
+                loading.loading = true
+                DispatchQueue.global(qos: .userInitiated).async {
+                    let accessing = url.startAccessingSecurityScopedResource()
+                    let parsed = loadRbxlx(from: url)
+                    if accessing { url.stopAccessingSecurityScopedResource() }
+                    DispatchQueue.main.async {
+                        if parsed.isEmpty {
+                            loading.loading = false
+                            alertShown = true
+                        } else {
+                            tree = parsed
+                            fileName = url.lastPathComponent
+                            editorShown = true
+                        }
                     }
-                } catch {
-                    // Handle failure.
-                    print("Unable to read file contents")
-                    print(error.localizedDescription)
-                    loading.loading = false
                 }
             }
             .environmentObject(loading)

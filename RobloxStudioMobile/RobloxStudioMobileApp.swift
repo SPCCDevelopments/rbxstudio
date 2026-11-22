@@ -51,156 +51,140 @@ extension UTType {
     }
 }
 
-func parseFile(data: String) -> Array<RbxObject>{
-    let toParse = data.split(whereSeparator: \.isNewline)
-    return parseFile(data: toParse, startAtLine: 3, endAtLine: toParse.count-5)
-}
-
-func parseFile(data: Array<Substring>, startAtLine: Int, endAtLine: Int) -> Array<RbxObject>{
-    var lineNum = startAtLine
-    
-    var array: Array<RbxObject> = []
-    var mode = 0 //0 = wait for property 1 = at property 2 = at child 3 = find end of child
-    
-    var tempName = ""
-    var lookForNumOfTabs = 0
-    var propertyStart = 0
-    var propertyEnd = 0
-    var tempClassName = ""
-    while lineNum <= endAtLine{
-        if data[lineNum].replacingOccurrences(of: "\t", with: "").first == "<"{
-            let numOfTabs = data[lineNum].components(separatedBy: "\t").count
-            var line = data[lineNum].replacingOccurrences(of: "\t", with: "")
-            line.removeFirst()
-            line.removeLast()
-            let parsing = line.split(separator: " ")
-            
-            switch mode {
-            case 0:
-                if parsing.first == "Item"{
-                    lookForNumOfTabs = numOfTabs
-                    tempClassName = String(parsing[1])
-                    tempClassName.removeFirst(7)
-                    tempClassName.removeLast()
-                    tempName = tempClassName
-                }else if parsing.first == "Properties" && lookForNumOfTabs + 1 == numOfTabs{
-                    propertyStart = lineNum
-                    mode = 1
-                }
-            case 1:
-                if parsing.first == "/Properties" && lookForNumOfTabs + 1 == numOfTabs{
-                    propertyEnd = lineNum
-                    mode = 2
-                }else if parsing.count > 1 && parsing.first == "string" && String(parsing[1]).prefix(11) == "name=\"Name\"" && lookForNumOfTabs + 2 == numOfTabs{
-                    tempName = String(line[line.index(after: line.firstIndex(of: ">")!)..<line.lastIndex(of: "<")!])
-                }
-            case 2:
-                if parsing.first == "/Item" && lookForNumOfTabs == numOfTabs{
-                    array.append(RbxObject(name: tempName, className: tempClassName, propertyStart: propertyStart, propertyEnd: propertyEnd))
-                    mode = 0
-                }else{
-                    mode = 3
-                }
-            default:
-                if parsing.first == "/Item" && lookForNumOfTabs == numOfTabs{
-                    array.append(RbxObject(name: tempName, className: tempClassName, propertyStart: propertyStart, propertyEnd: propertyEnd, childStart: propertyEnd+1, childEnd: lineNum-1))
-                    mode = 0
-                }
-            }
-        }
-        lineNum += 1
-    }
-    return array
-}
-
-func collectProperty(data: Array<Substring>, startAtLine: Int, endAtLine: Int) -> Array<PropertyInfo>{
-    var properties: Array<PropertyInfo> = []
-    var lineNum = startAtLine
-    
-    var tempName = ""
-    var tempType = ""
-    var tempValue = ""
-    
-    var childProperty: Array<OrderedDict> = []
-    
-    var waitForCDATAEnd = false
-    var waitForChildPropertyEnd = false
-    
-    while lineNum <= endAtLine{
-        var line = data[lineNum].replacingOccurrences(of: "\t", with: "")
-        
-//        print(line)
-        
-        if waitForCDATAEnd{
-            if line.contains("]]></ProtectedString>"){
-                waitForCDATAEnd = false
-                childProperty.append(OrderedDict(key: tempName, value: tempValue))
-                tempName = String(tempName[tempName.index(after: tempName.firstIndex(of: "\"")!)..<tempName.index(of: "\"><![CDATA")!])
-                properties.append(PropertyInfo(id: properties.endIndex, name: tempName, type: tempType, value: childProperty))
-                childProperty = []
-            }else{
-                tempValue += "\n" + String(data[lineNum]).replacingOccurrences(of: "\\", with: "\\\\")
-            }
-        }else if waitForChildPropertyEnd{
-//            print(tempType)
-            if line == "</"+tempType+">"{
-                waitForChildPropertyEnd = false
-                properties.append(PropertyInfo(id: properties.endIndex, name: tempName, type: "Array", value: childProperty))
-                childProperty = []
-            }else{
-                childProperty.append(OrderedDict(key: String(line[line.index(after: line.firstIndex(of: "<")!)..<line.firstIndex(of: ">")!]), value: String(line[line.index(after: line.firstIndex(of: ">")!)..<line.lastIndex(of: "<")!])))
-            }
-        }else{
-//            print(line)
-            let lineParsed = line[line.index(after: line.startIndex)..<line.endIndex].split(separator: " ")
-            
-            line = String(line[line.index(after: line.firstIndex(of: "<")!)..<line.firstIndex(of: ">")!])
-            
-            if lineParsed.count > 1{
-                tempType = String(lineParsed.first!)
-                tempName = String(lineParsed[1])
-            }else{
-                tempName = String(lineParsed.first!)
-            }
-            
-            if data[lineNum].contains("<![CDATA["){
-                waitForCDATAEnd = true
-                tempValue = String(data[lineNum]).replacingOccurrences(of: "/t", with: "")
-                tempValue = String(tempValue[tempValue.index(of: "<![CDATA[")!..<tempValue.endIndex])
-                tempValue.removeFirst(9)
-            }else{
-                line = String(data[lineNum])
-                if (line.lastIndex(of: "<")! < line.firstIndex(of: ">")!){
-                    waitForChildPropertyEnd = true
-                }else{
-                    tempName.removeFirst(6)
-                    childProperty.append(OrderedDict(key: tempName, value: String(line[line.index(after: line.firstIndex(of: ">")!)..<line.lastIndex(of: "<")!])))
-                    properties.append(PropertyInfo(id: properties.endIndex, name: String(tempName[tempName.startIndex..<tempName.index(before: tempName.firstIndex(of: ">")!)]), type: tempType, value: childProperty))
-                    childProperty = []
-                }
-            }
-        }
-        lineNum += 1
-    }
-    return properties
-}
-
-struct RbxObject{
-    init(name: String, className: String, propertyStart: Int, propertyEnd: Int, childStart: Int? = nil, childEnd: Int? = nil) {
-        self.name = name
-        self.className = className
-        self.propertyStart = propertyStart
-        self.propertyEnd = propertyEnd
-        self.childStart = childStart
-        self.childEnd = childEnd
-    }
+final class RbxNode: Identifiable {
     let id = UUID()
-    let name: String
+    var name: String
     let className: String
-    let propertyStart: Int
-    let propertyEnd: Int
-    let childStart: Int?
-    let childEnd: Int?
+    var children: [RbxNode]?
+    var propData = ""
+
+    init(className: String) {
+        self.className = className
+        self.name = className
+    }
+
+    func decodeProps() -> [PropertyInfo] {
+        var out = [PropertyInfo]()
+        for rec in propData.split(separator: "\u{1E}", omittingEmptySubsequences: true) {
+            let f = rec.split(separator: "\u{1F}", omittingEmptySubsequences: false).map { String($0) }
+            if f.count < 3 { continue }
+            var pairs = [OrderedDict]()
+            var i = 2
+            while i + 1 < f.count {
+                pairs.append(OrderedDict(key: f[i], value: f[i + 1]))
+                i += 2
+            }
+            out.append(PropertyInfo(id: out.count, name: f[0], type: f[1], value: pairs))
+        }
+        return out
+    }
+}
+
+final class RbxParser: NSObject, XMLParserDelegate {
+    var roots: [RbxNode] = []
+    private var stack: [RbxNode] = []
+    private var inProps = false
+    private var level = 0
+    private var propName = ""
+    private var propType = ""
+    private var childKey = ""
+    private var buf = ""
+    private var pairs: [(String, String)] = []
+    private var hadChildren = false
+    private var records: [String] = []
+    private var totalStored = 0
+    private let budget = 120_000_000
+
+    func parser(_ parser: XMLParser, didStartElement elementName: String, namespaceURI: String?, qualifiedName qName: String?, attributes attributeDict: [String: String] = [:]) {
+        if inProps {
+            level += 1
+            if level == 1 {
+                propType = elementName
+                propName = attributeDict["name"] ?? ""
+                buf = ""
+                pairs = []
+                hadChildren = false
+            } else if level == 2 {
+                childKey = elementName
+                buf = ""
+                hadChildren = true
+            }
+            return
+        }
+        if elementName == "Item" {
+            stack.append(RbxNode(className: attributeDict["class"] ?? "Instance"))
+        } else if elementName == "Properties" {
+            inProps = true
+            level = 0
+            records = []
+        }
+    }
+
+    func parser(_ parser: XMLParser, foundCharacters string: String) {
+        if inProps && level >= 1 { buf += string }
+    }
+
+    func parser(_ parser: XMLParser, foundCDATA CDATABlock: Data) {
+        if inProps && level >= 1, let s = String(data: CDATABlock, encoding: .utf8) { buf += s }
+    }
+
+    func parser(_ parser: XMLParser, didEndElement elementName: String, namespaceURI: String?, qualifiedName qName: String?) {
+        if inProps {
+            if level == 0 {
+                if elementName == "Properties" {
+                    inProps = false
+                    stack.last?.propData = records.joined(separator: "\u{1E}")
+                    records = []
+                }
+                return
+            }
+            if level == 2 {
+                pairs.append((childKey, buf.trimmingCharacters(in: .whitespacesAndNewlines)))
+                buf = ""
+            } else if level == 1 {
+                finishProperty()
+            }
+            level -= 1
+            return
+        }
+        if elementName == "Item", let node = stack.popLast() {
+            if let parent = stack.last {
+                if parent.children == nil { parent.children = [] }
+                parent.children!.append(node)
+            } else {
+                roots.append(node)
+            }
+        }
+    }
+
+    private func finishProperty() {
+        let isSource = propName == "Source"
+        var type = propType
+        var out = pairs
+        if !hadChildren {
+            let v = isSource ? buf : buf.trimmingCharacters(in: .whitespacesAndNewlines)
+            if propName == "Name" && propType == "string" { stack.last?.name = v }
+            out = [(propName, isSource ? v : String(v.prefix(500)))]
+        } else {
+            type = "Array"
+            out = out.map { ($0.0, String($0.1.prefix(500))) }
+        }
+        if propType == "BinaryString" || propType == "SharedString" || totalStored > budget { return }
+        var fields = [propName, type]
+        for p in out { fields.append(p.0); fields.append(p.1) }
+        let rec = fields.joined(separator: "\u{1F}")
+        totalStored += rec.utf8.count
+        records.append(rec)
+    }
+}
+
+func loadRbxlx(from url: URL) -> [RbxNode] {
+    guard let data = try? Data(contentsOf: url, options: .mappedIfSafe) else { return [] }
+    let delegate = RbxParser()
+    let xml = XMLParser(data: data)
+    xml.delegate = delegate
+    xml.parse()
+    return delegate.roots
 }
 
 struct PropertyInfo: Equatable, Hashable{

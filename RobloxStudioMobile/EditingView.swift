@@ -14,18 +14,15 @@ struct EditingView: View {
     @EnvironmentObject private var loading: LoadingFile
     @StateObject private var script = ScriptFile()
     @StateObject private var propertyList = PropertyInfoArray()
-    let file: String
+    let tree: [RbxNode]
     let fileName: String
-    let parsedArray: Array<RbxObject>
     @State private var leftOffset: Bool = false
     @State private var rightOffset: Bool = false
     @State private var controlButton = 0
     
-    init(file: String, fileName: String){
-        self.file = file
+    init(tree: [RbxNode], fileName: String){
+        self.tree = tree
         self.fileName = fileName
-        
-        self.parsedArray = parseFile(data: file)
     }
     
     var body: some View {
@@ -33,7 +30,7 @@ struct EditingView: View {
             NavigationView{
                 GeometryReader{ geometry in
                     HStack{
-                        mainListView(parsedArray: parsedArray, file: file)
+                        mainListView(tree: tree)
                             .padding(.trailing, -7)
                             .frame(width: geometry.size.width*0.25)
                             .animation(.default)
@@ -113,7 +110,7 @@ struct EditingView: View {
 
                                 switch(controlButton){
                                     case 0:
-                                        mainListView(parsedArray: parsedArray, file: file)
+                                        mainListView(tree: tree)
                                     default:
                                         PropertyView()
                                 }
