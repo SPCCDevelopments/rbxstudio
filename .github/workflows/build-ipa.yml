@@ -1,0 +1,50 @@
+name: Build unsigned IPA
+
+on:
+  workflow_dispatch:   # lets you run it manually from the Actions tab
+  push:
+    branches: [ main ]
+
+jobs:
+  build:
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Show Xcode version
+        run: xcodebuild -version
+
+      - name: Resolve Swift packages
+        run: |
+          xcodebuild -resolvePackageDependencies \
+            -project RobloxStudioMobile.xcodeproj \
+            -scheme RobloxStudioMobile
+
+      - name: Build (no code signing)
+        run: |
+          xcodebuild build \
+            -project RobloxStudioMobile.xcodeproj \
+            -scheme RobloxStudioMobile \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            DEVELOPMENT_TEAM=""
+
+      - name: Package IPA
+        run: |
+          APP_PATH=$(find build/Build/Products/Release-iphoneos -maxdepth 1 -name "*.app" | head -n 1)
+          echo "Found app: $APP_PATH"
+          mkdir -p Payload
+          cp -R "$APP_PATH" Payload/
+          zip -qr RobloxStudioMobile.ipa Payload
+
+      - name: Upload IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: RobloxStudioMobile-ipa
+          path: RobloxStudioMobile.ipa
